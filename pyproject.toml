@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "bank-data-processor"
+version = "0.1.0"
+description = "Script d'automatisation du traitement de données bancaires"
+authors = ["Bovis ALOUKOU bovisaloukou@gmail.com"]
+readme = "README.md"
+packages = [{include = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pandas = "^2.0.0" # Utilise pandas 2.0+ comme demandé
+pdfplumber = "^0.10.0" # Pour les PDF
+openpyxl = "^3.1.0" # Pour lire/écrire Excel
+python-json-logger = "^2.0.0" # Pour le logging structuré
+cryptography = "^42.0.0" # Pour le chiffrement AES-256 (Fernet)
+tomlkit = "^0.12.0" # Pour lire le fichier de config TOML
+reportlab = "^4.1.0" # Pour générer des rapports PDF
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0" # Framework de test
+pytest-cov = "^5.0.0" # Couverture de code
+ruff = "^0.3.0" # Linter/formatter rapide
+bandit = "^1.7.0" # Outil d'analyse de sécurité
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

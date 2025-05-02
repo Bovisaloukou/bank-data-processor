@@ -1,0 +1,4 @@
+Date,Montant,Devise,IBAN_Emetteur,IBAN_Beneficiaire,BIC_SWIFT,Description
+2024-03-15,5000000,XOF,************************4566,************************4566,ECOCCIA2,Transfert valide XOF
+2024-03-16,8000,EUR,***********************0185,******************3000,DEUTDEFF,Paiement valide EUR
+2024-03-19,7500,USD,******************6819,***********************0185,CHASUSA2,Transaction valide USD

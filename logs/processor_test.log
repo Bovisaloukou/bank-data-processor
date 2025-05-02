@@ -1,0 +1,2 @@
+{"message": "D\u00e9but du pipeline de traitement des donn\u00e9es. R\u00e9pertoire d'entr\u00e9e : /home/bovis/Documents/Mes-Projets/Python/bank_data_processor/data/input_test", "taskName": null, "event": "pipeline_start", "input_dir": "/home/bovis/Documents/Mes-Projets/Python/bank_data_processor/data/input_test"}
+{"message": "Aucun nouveau fichier \u00e0 traiter.", "taskName": null, "event": "pipeline_no_new_files"}

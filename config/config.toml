@@ -1,0 +1,22 @@
+# Fichier de configuration pour le processeur de données bancaires
+
+[paths]
+input_dir = "data/input"
+output_dir = "data/output"
+quarantine_dir = "data/quarantine"
+encryption_key_file = ".encryption_key" # Fichier pour stocker la clé de chiffrement (localement)
+processed_files_log = "data/processed_files.log" # Fichier pour le mécanisme de recovery
+
+[logging]
+level = "DEBUG" # DEBUG, INFO, WARNING, ERROR
+log_file = "logs/processor.log"
+
+[validation]
+# Règles de validation métier
+max_transaction_amount = 10000000 # Montant maximal autorisé (ex: en XOF)
+allowed_currencies = ["XOF", "EUR", "USD"]
+# Ajoutez d'autres règles si nécessaire (ex: pattern regex pour IBAN/BIC)
+
+[processing]
+# Paramètres de traitement
+parallel_workers = 4 # Nombre de processus/threads pour le parallélisme (ajuster selon le CPU)
