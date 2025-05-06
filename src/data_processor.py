@@ -9,11 +9,17 @@ from pathlib import Path
 import logging
 import base64
 from typing import Dict, Any, List, Tuple
+import pytesseract
+from PIL import Image
+import tempfile
 
 # Importer les utilitaires et la logique de validation
 from src.utils import setup_structured_logging, generate_encryption_key, encrypt_data, decrypt_data, mask_sensitive_data
 from src.validation import load_validation_rules, validate_transaction
 from src.reporting import generate_pdf_report, generate_excel_report
+from src.categorization import categoriser_transaction, CATEGORIES_PAR_DEFAUT
+from src.fraud_detection import detect_anomalies
+from src.notifications import send_email_notification, send_slack_notification
 
 class DataProcessor:
     """
@@ -186,8 +192,29 @@ class DataProcessor:
                             self.logger.debug(f"Table {table_num} extraite de la page {page_num} du PDF {file_path}", extra={"event": "pdf_table_extracted", "file": str(file_path), "page": page_num, "table": table_num, "rows": len(df)})
 
             if not all_data:
-                 self.logger.warning(f"Aucune table trouvée dans le PDF : {file_path}", extra={"event": "pdf_no_table", "file": str(file_path)})
-                 return pd.DataFrame() # Retourne un DataFrame vide standard
+                self.logger.warning(f"Aucune table trouvée dans le PDF : {file_path}. Tentative d'extraction OCR...", extra={"event": "pdf_no_table_ocr", "file": str(file_path)})
+                # --- Extraction OCR ---
+                ocr_rows = []
+                with pdfplumber.open(file_path) as pdf:
+                    for page_num, page in enumerate(pdf.pages):
+                        with tempfile.NamedTemporaryFile(suffix='.png') as tmp_img:
+                            page_image = page.to_image(resolution=300)
+                            page_image.save(tmp_img.name, format='PNG')
+                            text = pytesseract.image_to_string(Image.open(tmp_img.name), lang='fra+eng')
+                            # Découper le texte en lignes, filtrer les lignes qui ressemblent à des transactions
+                            for line in text.splitlines():
+                                # Heuristique simple : ligne contenant un montant et une devise
+                                if any(dev in line for dev in ['XOF', 'EUR', 'USD']) and any(char.isdigit() for char in line):
+                                    ocr_rows.append(line)
+                # Tenter de parser les lignes OCR en colonnes (à adapter selon le format réel)
+                if ocr_rows:
+                    df_ocr = pd.DataFrame({'Ligne_OCR': ocr_rows})
+                    self.logger.info(f"{len(df_ocr)} lignes extraites par OCR du PDF {file_path}", extra={"event": "pdf_ocr_extracted", "file": str(file_path), "ocr_rows": len(df_ocr)})
+                    return df_ocr
+                else:
+                    self.logger.warning(f"OCR n'a extrait aucune ligne exploitable du PDF : {file_path}", extra={"event": "pdf_ocr_no_data", "file": str(file_path)})
+                    return pd.DataFrame()
+                # --- Fin extraction OCR ---
 
             # Concaténer toutes les tables extraites
             # Gérer les colonnes potentiellement différentes ou manquantes entre tables/pages
@@ -349,6 +376,12 @@ class DataProcessor:
         all_valid_transactions: List[pd.DataFrame] = []
         all_invalid_transactions: List[pd.DataFrame] = []
 
+        notification_cfg = self.config.get('notifications', {})
+        notify_email = notification_cfg.get('email_enabled', False)
+        notify_slack = notification_cfg.get('slack_enabled', False)
+        email_params = notification_cfg.get('email', {})
+        slack_webhook = notification_cfg.get('slack_webhook', None)
+
         # Utiliser concurrent.futures pour le parallélisme
         # ProcessPoolExecutor si le traitement est intensif en CPU (comme l'extraction PDF)
         # ThreadPoolExecutor si le traitement est intensif en I/O (lecture de fichier)
@@ -371,9 +404,18 @@ class DataProcessor:
                         # Appliquer la validation
                         valid_df, invalid_df = self._validate_data(cleaned_df)
 
+                        # --- Catégorisation automatique ---
                         if not valid_df.empty:
+                            # Appliquer la catégorisation sur chaque ligne
+                            if 'Description' in valid_df.columns:
+                                valid_df['Catégorie'] = valid_df.apply(
+                                    lambda row: categoriser_transaction(row.get('Description', ''), row.get('Montant', 0.0)), axis=1
+                                )
+                            else:
+                                valid_df['Catégorie'] = 'autre'
                             all_valid_transactions.append(valid_df)
                             self.logger.info(f"{len(valid_df)} transactions valides extraites de {processed_file_path}", extra={"event": "valid_transactions_collected", "file": str(processed_file_path), "valid_count": len(valid_df)})
+                        # --- fin catégorisation ---
 
                         if not invalid_df.empty:
                             all_invalid_transactions.append(invalid_df)
@@ -405,30 +447,77 @@ class DataProcessor:
 
 
         # Génération des rapports finaux si des données valides existent
-        if not final_valid_df.empty:
-            self.logger.info("Génération des rapports finaux...", extra={"event": "report_generation_start"})
-            try:
-                pdf_report_path = output_dir / "rapport_transactions_valides.pdf"
-                generate_pdf_report(final_valid_df, pdf_report_path)
-                self.logger.info(f"Rapport PDF généré : {pdf_report_path}", extra={"event": "report_generated", "format": "PDF", "path": str(pdf_report_path)})
+        try:
+            if not final_valid_df.empty:
+                # --- Détection de fraudes/anomalies ---
+                suspects_df = detect_anomalies(final_valid_df)
+                if not suspects_df.empty:
+                    suspects_path = output_dir / "transactions_suspectes.csv"
+                    suspects_df.to_csv(suspects_path, index=False)
+                    self.logger.warning(f"{len(suspects_df)} transactions suspectes détectées (anomalies montants). Export : {suspects_path}", extra={"event": "fraud_anomaly_detected", "count": len(suspects_df), "file": str(suspects_path)})
+                    if not suspects_df.empty and notify_email:
+                        send_email_notification(
+                            subject="Alerte : Transactions suspectes détectées",
+                            body=f"{len(suspects_df)} transactions suspectes détectées. Voir {suspects_path}",
+                            to_email=email_params.get('to'),
+                            smtp_server=email_params.get('smtp_server'),
+                            smtp_port=email_params.get('smtp_port'),
+                            smtp_user=email_params.get('smtp_user'),
+                            smtp_password=email_params.get('smtp_password')
+                        )
+                    if not suspects_df.empty and notify_slack and slack_webhook:
+                        send_slack_notification(slack_webhook, f"Alerte : {len(suspects_df)} transactions suspectes détectées.")
+                # --- fin détection fraudes ---
+                self.logger.info("Génération des rapports finaux...", extra={"event": "report_generation_start"})
+                try:
+                    pdf_report_path = output_dir / "rapport_transactions_valides.pdf"
+                    generate_pdf_report(final_valid_df, pdf_report_path)
+                    self.logger.info(f"Rapport PDF généré : {pdf_report_path}", extra={"event": "report_generated", "format": "PDF", "path": str(pdf_report_path)})
 
-                excel_report_path = output_dir / "transactions_valides.xlsx"
-                generate_excel_report(final_valid_df, excel_report_path)
-                self.logger.info(f"Rapport Excel généré : {excel_report_path}", extra={"event": "report_generated", "format": "Excel", "path": str(excel_report_path)})
+                    excel_report_path = output_dir / "transactions_valides.xlsx"
+                    generate_excel_report(final_valid_df, excel_report_path)
+                    self.logger.info(f"Rapport Excel généré : {excel_report_path}", extra={"event": "report_generated", "format": "Excel", "path": str(excel_report_path)})
 
-                # Sauvegarder les données valides nettoyées dans un fichier standardisé
-                cleaned_data_path = output_dir / "transactions_valides_nettoyees.csv"
-                # Optionnel : chiffrer ce fichier s'il contient des PII non masquées
-                # Pour la démo, on va masquer les PII dans le DF nettoyé.
-                final_valid_df.to_csv(cleaned_data_path, index=False)
-                self.logger.info(f"Données valides nettoyées sauvegardées : {cleaned_data_path}", extra={"event": "cleaned_data_saved", "path": str(cleaned_data_path)})
+                    # Sauvegarder les données valides nettoyées dans un fichier standardisé
+                    cleaned_data_path = output_dir / "transactions_valides_nettoyees.csv"
+                    # Optionnel : chiffrer ce fichier s'il contient des PII non masquées
+                    # Pour la démo, on va masquer les PII dans le DF nettoyé.
+                    final_valid_df.to_csv(cleaned_data_path, index=False)
+                    self.logger.info(f"Données valides nettoyées sauvegardées : {cleaned_data_path}", extra={"event": "cleaned_data_saved", "path": str(cleaned_data_path)})
 
 
-            except Exception as e:
-                 self.logger.error(f"Erreur lors de la génération des rapports : {e}", extra={"event": "report_generation_failed", "error": str(e)})
-        else:
-            self.logger.warning("Aucune transaction valide à rapporter.", extra={"event": "no_valid_transactions_for_report"})
+                except Exception as e:
+                    self.logger.error(f"Erreur lors de la génération des rapports : {e}", extra={"event": "report_generation_failed", "error": str(e)})
+                if notify_email:
+                    send_email_notification(
+                        subject="Traitement terminé",
+                        body=f"Le pipeline Bank Data Processor est terminé. {len(final_valid_df)} transactions valides.",
+                        to_email=email_params.get('to'),
+                        smtp_server=email_params.get('smtp_server'),
+                        smtp_port=email_params.get('smtp_port'),
+                        smtp_user=email_params.get('smtp_user'),
+                        smtp_password=email_params.get('smtp_password')
+                    )
+                if notify_slack and slack_webhook:
+                    send_slack_notification(slack_webhook, f"Pipeline terminé. {len(final_valid_df)} transactions valides.")
+            else:
+                self.logger.warning("Aucune transaction valide à rapporter.", extra={"event": "no_valid_transactions_for_report"})
 
+        except Exception as e:
+            self.logger.error(f"Erreur critique lors du traitement : {e}", extra={"event": "pipeline_critical_failure", "error": str(e)})
+            if notify_email:
+                send_email_notification(
+                    subject="Erreur critique Bank Data Processor",
+                    body=f"Erreur critique lors du traitement : {e}",
+                    to_email=email_params.get('to'),
+                    smtp_server=email_params.get('smtp_server'),
+                    smtp_port=email_params.get('smtp_port'),
+                    smtp_user=email_params.get('smtp_user'),
+                    smtp_password=email_params.get('smtp_password')
+                )
+            if notify_slack and slack_webhook:
+                send_slack_notification(slack_webhook, f"Erreur critique lors du traitement : {e}")
+            raise
 
         self.logger.info("Pipeline de traitement des données terminé.", extra={"event": "pipeline_end"})
 

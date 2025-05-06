@@ -1,6 +1,53 @@
 # Bank Data Processor
 
-Ce projet implémente un script Python pour automatiser le traitement de données bancaires (ingestion, nettoyage, validation, reporting). Il est conçu comme une démonstration des compétences en automatisation, traitement de données et développement logiciel Python de niveau "production".
+## Vue d'ensemble
+
+Le Bank Data Processor est un outil automatisé de traitement de données bancaires conçu pour simplifier et sécuriser le traitement des transactions financières. Ce projet répond aux besoins critiques des institutions financières en matière d'automatisation, de standardisation et de sécurité des données.
+
+### Pourquoi utiliser ce projet ?
+
+- **Automatisation complète** : Traitement automatique des fichiers bancaires dans différents formats (CSV, Excel, PDF)
+- **Standardisation des données** : Conversion automatique des formats et nettoyage des données
+- **Sécurité renforcée** : Chiffrement AES-256 et masquage des données sensibles
+- **Conformité** : Validation des transactions selon des règles métier configurables
+- **Reporting professionnel** : Génération automatique de rapports en PDF et Excel
+
+### Fonctionnalités principales
+
+1. **Ingestion multi-format**
+   - Import de fichiers CSV
+   - Lecture de fichiers Excel (.xlsx/.xls)
+   - Extraction depuis PDF structurés
+
+2. **Traitement intelligent**
+   - Élimination des doublons
+   - Standardisation automatique des formats
+   - Validation des IBAN/BIC
+   - Contrôle des montants et devises
+
+3. **Sécurité et conformité**
+   - Chiffrement des données sensibles
+   - Masquage automatique des informations personnelles
+   - Validation selon des règles métier configurables
+   - Traçabilité complète (logs JSON)
+
+4. **Reporting et export**
+   - Rapports PDF détaillés
+   - Exports Excel analysables
+   - Logs structurés pour audit
+
+### Cas d'utilisation typiques
+
+- **Banques** : Traitement automatisé des transactions quotidiennes
+- **Services financiers** : Validation et standardisation des données clients
+- **Audit financier** : Génération de rapports conformes et sécurisés
+- **Trésorerie d'entreprise** : Automatisation du traitement des relevés bancaires
+
+Ce projet est particulièrement utile pour les équipes qui :
+- Traitent quotidiennement de grands volumes de données bancaires
+- Ont besoin d'automatiser leurs processus de validation
+- Doivent assurer la sécurité des données financières
+- Génèrent régulièrement des rapports financiers
 
 ## Auteur
 
@@ -28,13 +75,26 @@ Le système suit une architecture modulaire basée sur une classe principale `Da
 *   **Gestion des Erreurs et Recovery** : Les exceptions sont gérées au niveau du traitement de chaque fichier dans `_safe_process_file` pour éviter qu'une erreur dans un fichier n'arrête tout le pipeline. Un mécanisme simple de recovery est implémenté en enregistrant les chemins des fichiers traités dans un log (`data/processed_files.log`). Au redémarrage, le processeur lit ce log et ignore les fichiers déjà traités.
 *   **Reporting** : Des fonctions (`generate_pdf_report`, `generate_excel_report`) sont fournies pour générer des rapports résumant les transactions valides dans des formats courants.
 
+---
+
+## Fonctionnalités "Game Changer"
+
+- **Catégorisation automatique** : Classement des transactions par catégorie (salaire, loyer, alimentation, etc.)
+- **Extraction intelligente de PDF non structurés** : Utilisation de l’OCR (Tesseract) pour extraire les transactions à partir de relevés PDF scannés ou non tabulaires.
+- **Détection de fraudes/anomalies** : Identification automatique des transactions suspectes (montants anormaux, etc.), exportées dans `data/output/transactions_suspectes.csv`.
+- **Dashboard web interactif** : Visualisation en temps réel des transactions, anomalies, catégories et rapports via Streamlit.
+- **API RESTful** : Lancement du pipeline, récupération des résultats et téléchargement des rapports via FastAPI.
+- **Notifications intelligentes** : Alertes par email ou Slack en cas d’anomalie, d’erreur critique ou à la fin du traitement.
+
+---
+
 ## Workflow de Développement
 
 Ce projet utilise `poetry` pour la gestion des dépendances et plusieurs outils pour assurer la qualité du code.
 
 1.  **Cloner le dépôt** :
     ```bash
-    git clone <URL_DU_DEPOT>
+    git clone https://github.com/Bovisaloukou/bank-data-processor.git
     cd bank-data-processor
     ```
 2.  **Installer Poetry** : Si vous n'avez pas Poetry, suivez les instructions officielles : [https://python-poetry.org/docs/](https://python-poetry.org/docs/)
@@ -86,6 +146,54 @@ Ce projet utilise `poetry` pour la gestion des dépendances et plusieurs outils 
     *   Les transactions invalides (celles qui ont échoué à la validation) sont enregistrées dans `data/quarantine/`.
     *   Le log de traitement (`logs/processor.log`) contient l'historique détaillé de l'exécution.
 
+## Utilisation des fonctionnalités avancées
+
+### Dashboard web
+1. Installer Streamlit :
+   ```bash
+   poetry add streamlit
+   ```
+2. Lancer le dashboard :
+   ```bash
+   poetry run streamlit run src/dashboard.py
+   ```
+3. Accéder à l’interface sur http://localhost:8501
+
+### API RESTful
+1. Installer FastAPI et Uvicorn :
+   ```bash
+   poetry add fastapi uvicorn
+   ```
+2. Lancer l’API :
+   ```bash
+   poetry run uvicorn src.api:app --reload
+   ```
+3. Documentation interactive : http://localhost:8000/docs
+
+### Notifications intelligentes
+Ajouter dans `config/config.toml` :
+```toml
+[notifications]
+email_enabled = true
+slack_enabled = true
+
+[notifications.email]
+to = "destinataire@email.com"
+smtp_server = "smtp.example.com"
+smtp_port = 465
+smtp_user = "utilisateur@email.com"
+smtp_password = "motdepasse"
+
+slack_webhook = "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+```
+
+### Extraction OCR (PDF scannés)
+Installer Tesseract et les dépendances Python :
+```bash
+sudo apt install tesseract-ocr
+poetry add pytesseract pillow
+```
+
 ## Types de Documents attendus
 
 Le script est conçu pour traiter des fichiers contenant des données **structurées** de transactions bancaires. Il ne s'attend pas à des "types" de documents bancaires spécifiques comme des chèques ou des bordereaux de versement individuels (qui sont souvent des images ou des formats très variables), mais plutôt des **relevés de transactions** ou des **exports de systèmes bancaires**.
@@ -114,5 +222,3 @@ Le script s'attend à retrouver ces informations (ou une partie) pour pouvoir ap
 Le script tentera d'adapter les noms de colonnes s'ils contiennent des espaces ou des caractères spéciaux (ex: "IBAN Emetteur" deviendra "IBAN_Emetteur"). Cependant, plus la structure des fichiers d'entrée est cohérente, meilleur sera le résultat.
 
 Pour les PDF, le script essaie de trouver et d'extraire les données tabulaires. Sa réussite dépend fortement de la façon dont le PDF est structuré (s'il contient de vraies tables lisibles par des logiciels).
-
-Ce projet te fournira une excellente base pour démontrer tes compétences sur ton CV. Bonne chance pour ton stage chez Orabank !
